@@ -11,9 +11,6 @@
 const char* ssid = STASSID;
 const char* password = STAPSK;
 
-const char* STAT_ON = "{ \"switch\": true }";
-const char* STAT_OFF = "{ \"switch\": false }";
-
 ESP8266WebServer server(80);
 
 volatile float distance;
@@ -74,7 +71,12 @@ void setup() {
     bool st = strcmp(sw,"true")==0;
 
     digitalWrite(SW1, st?1:0);
-    server.send(200, "application/json", st?STAT_ON:STAT_OFF);
+    StaticJsonDocument<200> doc;
+    char jsonBuffer[512];
+
+    doc["switch"] = digitalRead(SW1)?"true":"false";
+    serializeJson(doc, jsonBuffer);
+    server.send(200, "application/json", jsonBuffer);
   });
   server.on("/switch", HTTP_GET, []() {
     
