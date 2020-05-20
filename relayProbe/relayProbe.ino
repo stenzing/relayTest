@@ -14,7 +14,40 @@ const char* password = STAPSK;
 ESP8266WebServer server(80);
 
 volatile float distance;
+volatile float triggerOff;
 #define SW1 D0
+
+DeserializationError readRequest(DynamicJsonDocument doc) {
+
+  Serial.print("body:");
+  Serial.println(server.arg("plain"));
+  auto error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(error.c_str());
+    server.send(404, "application/json", "{ \"error\": \"Json read failed\"}");
+  }
+  return error;
+}
+
+void sendSwitchStatus() {
+    StaticJsonDocument<200> doc;
+    char jsonBuffer[512];
+    
+    doc["switch"] = digitalRead(SW1)?"true":"false";
+    serializeJson(doc, jsonBuffer);
+    server.send(200, "application/json", jsonBuffer);
+}
+
+void sendDistStatus() {
+  StaticJsonDocument<200> doc;
+  char jsonBuffer[512];
+  
+  doc["distance"] = distance;
+  doc["triggerOff"] = triggerOff;
+  serializeJson(doc, jsonBuffer);
+  server.send(200, "application/json", jsonBuffer);  
+}
 
 void setup() {
   WiFi.persistent(false);
@@ -55,47 +88,38 @@ void setup() {
   server.on("/switch", HTTP_PUT, []() {
     const char* sw;
     DynamicJsonDocument doc(400);
+    DeserializationError error;
+    error = readRequest(doc);
+    if (!error) {
+      sw = doc["switch"];
+      Serial.print("Switch value:");
+      Serial.print(sw);
+      bool st = strcmp(sw,"true")==0;
 
-    Serial.print("body:");
-    Serial.println(server.arg("plain"));
-    auto error = deserializeJson(doc, server.arg("plain"));
-    if (error) {
-      Serial.print(F("deserializeJson() failed with code "));
-      Serial.println(error.c_str());
-      server.send(404, "application/json", "{ \"error\": \"Json read failed\"}");
-      return;
+      digitalWrite(SW1, st?1:0);
+      sendSwitchStatus();
     }
-    sw = doc["switch"];
-    Serial.print("Switch value:");
-    Serial.print(sw);
-    bool st = strcmp(sw,"true")==0;
-
-    digitalWrite(SW1, st?1:0);
-    StaticJsonDocument<200> doc;
-    char jsonBuffer[512];
-
-    doc["switch"] = digitalRead(SW1)?"true":"false";
-    serializeJson(doc, jsonBuffer);
-    server.send(200, "application/json", jsonBuffer);
   });
   server.on("/switch", HTTP_GET, []() {
-    
-    StaticJsonDocument<200> doc;
-    char jsonBuffer[512];
-    Serial.printf("Stations connected = %d\n", WiFi.softAPgetStationNum());
-    
-    doc["switch"] = digitalRead(SW1)?"true":"false";
-    serializeJson(doc, jsonBuffer);
-    server.send(200, "application/json", jsonBuffer);
+    sendSwitchStatus();
   });
 
   server.on("/dist", HTTP_GET, []() {
-    StaticJsonDocument<200> doc;
-    char jsonBuffer[512];
-    
-    doc["distance"] = distance;
-    serializeJson(doc, jsonBuffer);
-    server.send(200, "application/json", jsonBuffer);
+    sendDistStatus();
+  });
+  server.on("/dist", HTTP_PUT, []() {
+    const char* off;
+    DynamicJsonDocument doc(400);
+    DeserializationError error;
+    error = readRequest(doc);
+    if (!error) {
+      off = doc["triggerOff"];
+      Serial.print("trigger value:");
+      Serial.print(off);
+      triggerOff = atof(off);
+
+      sendDistStatus();
+    }
   });
   
   server.begin();
@@ -117,6 +141,10 @@ void loop() {
     distance = (diff)/58.0f;
   } else {
     distance =-1.0f;  
+  }
+
+  if (distance < triggerOff) {
+    digitalWrite(SW1,0);
   }
 
   if (currentMillis - lastTime >= 10000) {
